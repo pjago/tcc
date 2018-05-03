@@ -1,0 +1,1 @@
+(ns pjago.quad.prop)
