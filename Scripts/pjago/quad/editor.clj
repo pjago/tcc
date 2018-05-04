@@ -1,6 +1,6 @@
 (do (in-ns 'pjago.quad)
     (import '[UnityEngine GameObject Screen GUI Color Rect]))
-  
+
 ;; HOOKS
 
 (def new-rect (memoize #(Rect. %1 %2 %3 %4)))

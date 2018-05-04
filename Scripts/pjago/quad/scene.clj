@@ -1,9 +1,6 @@
 (do (in-ns 'pjago.quad)
     (use 'pjago.watch)
-    (require '[common.processing :as x :refer [render]]
-             '[timsg.hydrate :refer [dehydrate]])
-    (import '[UnityEngine.SceneManagement SceneManager]
-            '[XaertV Drone]))
+    (require '[common.processing :as x :refer [render]]))
 
 ;; TCC
 
@@ -28,14 +25,11 @@
   Rigidbody
   (check [obj]
     (select-props obj
-      [:drag :angularDrag :constraints
+      [:drag :angular-drag :constraints
        :mass :center-of-mass :inertia-tensor]))
   (watch [obj]
     (select-props obj
-      [:position :rotation :velocity :angular-velocity]))
-  Component ;being lazy for a moment
-  (check [obj])
-  (watch [obj] (dehydrate obj)))
+      [:position :rotation :velocity :angular-velocity])))
 
 ;; ROLES
 (def quad-ex
@@ -135,16 +129,12 @@
   ([] [:sansbox])
   ([gob child])
   ([gob]
-   ; (if-cmpt (object-search :camera-top) [cam Camera]
-   ;   (with-cmpt gob [dr Drone]
-   ;     (set! (.-projectWith dr) cam)))
    (if-cmpt (object-tagged ":camera-main") [cam Camera]
      (mario-cam! (.-gameObject cam) gob))))
 
 (defn background
   ([] 
-   ; (clear-all!)
-   [nil :light-main :camera-main :camera-top :target])
+   [nil ::manager :light-main :other-light :camera-main :camera-top :target])
   ([_])
   ([_ child]))
 
@@ -176,7 +166,8 @@
    (doseq [p (state gob :props)]
      (destroy-immediate (cmpt p Joint))
      (destroy-immediate (cmpt p Rigidbody))
-     (clear-hook p :fixed-update))))
+     (clear-hook p :fixed-update))
+   (log (state gob :ref))))
 
 (defmacro defq [name n materials opt]
   (let [vars (mapv #(resolve (symbol (str "quad-" %))) n)]
@@ -198,23 +189,27 @@
                  :fixed-update #'height-ctrl}
    :ctrl/euler nil})
 
+(defq qboth [0 1] [:plastic-white :plastic-red]
+  {:ctrl/height {:state (new-pid 50 1.0 1.0 5)
+                 :fixed-update #'height-ctrl}})
+
 (defq qlook [0 1] [:plastic-white :plastic-red]
   {:ctrl/height {:state (new-pid 200 1.0 1.0 1)
                  :fixed-update #'height-ctrl}
-   :ctrl/plane {:state (new-pid 3.0 100 5.0 5)}
-   :plane/look {:fixed-update #'plane-ctrl}})
+   :plane/look {:state (new-pid 3.0 100 5.0 5)
+                :fixed-update #'plane-ctrl}})
 
 (defq qomni [0 1] [:plastic-white :plastic-red]
   {:ctrl/height {:state (new-pid 200 1.0 1.0 1)
                  :fixed-update #'height-ctrl}
-   :ctrl/plane {:state (new-pid 3.0 100 5.0 5)}
-   :plane/omni {:fixed-update #'plane-ctrl}})
+   :plane/omni {:state (new-pid 3.0 100 5.0 5)
+                :fixed-update #'plane-ctrl}})
 
 (defq qgoto [0 1] [:plastic-white :plastic-red]
   {:ctrl/height {:state (new-pid 200 1.0 1.0 1)
                  :fixed-update #'height-ctrl}
-   :ctrl/plane {:state (new-pid 3.0 100 5.0 5)}
-   :plane/goto {:fixed-update #'plane-ctrl}})
+   :plane/goto {:state (new-pid 3.0 100 5.0 5)
+                :fixed-update #'plane-ctrl}})
 
 ;; TOOLS
 
@@ -242,31 +237,19 @@
   
 ;; RENDER
 
-; (do (import '[UnityEditor EditorApplication])
-;     (use 'common.repl))
-
-; (defonce renderer
-;   (alter-var-root #'x/*renderer* comp
-;     (x/tree-seq (comp x/flatten-wrap (x/log x/keypath)))
-;     (fn [rf]
-;       (x/doto rf clc
-;         #(if EditorApplication/isPaused (pause))
-;         #(run! clear! [*ns* :sansbox])))))
-
 (def simple-prop
   (x/renders
     (x/doto #'quad #'quad-1
       #(state+ % :offset [929])
       #(hook- % :fixed-update :ctrl/euler))
     :sansbox
-    [(x/renders #'propeller ::qp/fixed [])]))
+    [(x/renders #'propeller ::qp/fixed nil)]))
 
 (def armed-prop
   (x/renders
-    ; ((physx+ [:unstable-rotation])
-     (x/doto #'quad quad-1
-       #(state+ % :offset [929])
-       #(hook- % :fixed-update :ctrl/euler))
+    (x/doto #'quad quad-1
+      #(state+ % :offset [929])
+      #(hook- % :fixed-update :ctrl/euler))
     :sansbox
     [#'arm]))
 
@@ -311,7 +294,7 @@
            r (.. ref transform localRotation eulerAngles z)
            u (step-next (state gob k) r (- r (arc 90 (- r y))))
            p0 (+ u)
-           p1 (- u)] ;todo: use avl set, that supports nth
+           p1 (- u)]
       (update-state (nth props 0) :spin/set + p0)
       (update-state (nth props 1) :spin/set + p1)))
 
@@ -324,7 +307,7 @@
 (def gangorra ;problem, cause it is stateful
   (x/renders
     (-> #'quad
-        ; ((physx+ [:unstable-rotation]))
+        ; ((physx+ [:unstable-rotation])) ;todo
         ((x/freeze [:x :y :z] [:x :y]))
         (x/doto quad-1
           #(if (isa? (x/tag %2) ::lever)
@@ -343,24 +326,23 @@
      #'arm
      #'arm]))
 
-;; DOSTUFF
+; DOSTUFF
 
-(def wait 5) ;seconds
-(def qeu (atom (x/pool 4 :sansbox)))
-(def ptime (atom -1))
+(def wait 20) ;seconds
+(def qeu (atom (partition 2 (x/pool [nil qboth :sansbox]))))
+(def prev (atom -1))
 
 (defn main [^GameObject gob _]
-  (let [time (int (mod Time/time wait))
-        test (and (zero? time) (not (zero? @ptime)))]
-    (reset! ptime time)
-    (when test
-      (when-let [q (first (x/render :sansbox))]
-        (log (gensym "Creating new gob "))
-        (set! (.. q transform position) (v3 0 5 0))
-        (set! (.. q transform rotation) (aa 1 1 0 0))
-        (hook+ q :on-destroy (x/fx (swap! qeu rest)))
-        (destroy q wait)))))
-
-(defonce renderer
-  (alter-var-root #'x/*renderer* comp
-    (x/tree-seq (comp x/flatten-wrap (x/log x/keypath)))))
+  (let [now (int (mod Time/time wait))
+        edge (and (zero? now) (not (zero? @prev)))]
+    (reset! prev now)
+    (when edge
+      (when-let [[q s] (first @qeu)]
+        (set! (.. s transform position) (v3 0 3 0))
+        (set! (.. s transform rotation) (aa 5 1 0 0))
+        (hook+ q :on-destroy ;todo: change the path name
+          (x/fx (spit-watch q {:info "qboth"})
+                (swap! qeu next)))
+        (destroy q (dec wait))
+        (destroy s (dec wait))
+        (full-watch q)))))

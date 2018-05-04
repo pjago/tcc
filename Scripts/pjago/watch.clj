@@ -1,5 +1,6 @@
 (ns pjago.watch
   (:use arcadia.core)
+  (:import (UnityEngine GameObject))
   (:import (clojure.lang Counted
                          Sequential
                          IPersistentCollection
@@ -16,7 +17,7 @@
 
 ;; RING BUFFER due to a bug with metadata not found
 
-(set! *unchecked-math* true)
+; (set! *unchecked-math* true)
 
 (defmutable RingBuffer [^long start ^long len buf meta]
   Counted
@@ -109,7 +110,7 @@
                           v)]))
     (check obj)))
 
-(defn watch-state [^GameObject gob k]
+(defn watch-state [^UnityEngine.GameObject gob k]
   (swap! watch-db update gob (partial merge-with conj)
     (into {}
       (map (fn [v] [v (watch (state gob v))]))

@@ -1,6 +1,6 @@
 (ns common.processing
   (:use [arcadia.core :exclude [if-cmpt log children]] arcadia.linear)
-  (:import [UnityEngine Application GameObject MeshRenderer Rigidbody RigidbodyConstraints]
+  (:import [UnityEngine Application Transform GameObject MeshRenderer Rigidbody RigidbodyConstraints]
            [clojure.lang IMeta IDeref]
            ArcadiaState ArcadiaBehaviour |ArcadiaBehaviour+IFnInfo[]|)
   (:refer-clojure :exclude [map replace tree-seq doto memoize])
@@ -135,18 +135,27 @@
 
 ;tagged assimilates objects-tagged to objects-search
 ;it also facilitates the usage of isa? with tags
+;bug: this is in a weird position, because it has to do it before step
+;so it needs at init see both the tag and the object, but should'nt fab here
 (defn tagged "if the tag doesn't yet exists, you can run common.repl/tag-all! to create"
   [rf]
   (let [t (volatile! "Untagged")]
     (fn
+      ([gob] (rf gob))
       ([gob child] (rf gob child))
       ([]
-       (c/doto (rf) (->> first keypath str (vreset! t))))
-      ([gob]
-       (try
-         (if (instance? GameObject gob) (set! (.tag gob) @t))
-         (catch Exception _))
-       (rf gob)))))
+       (let [[h & tail] (rf)]
+         (vreset! t (str (keypath h)))
+         (cons
+           (fn 
+             ([] [h])
+             ([gob]
+              (try
+                (if (instance? GameObject gob)
+                  (set! (.tag gob) @t))
+                (catch Exception _))
+              gob))
+           tail))))))
 
 (defn freeze [pos & [rot]]
   (letfn [(fpos [x]
@@ -214,8 +223,12 @@
 
 (defn replace [lookup]
   (partial init
-    #(cons (lookup (first %)) 
-           (rest %))))
+    #(let [node (first %)]
+       (cons
+         (if (branch? node)
+           ((replace lookup) node)
+           (lookup node))
+         (rest %)))))
 
 (defn with-db [lookup]
   (partial init
@@ -259,10 +272,13 @@
 ;; RENDER
 
 (def ^{:doc "flattens init to be [node & branches]"}
-  flatten-wrap
-  (partial init
-    #(let [[h & t] (flatten %)]
-       (cons h (c/map wrap t)))))
+  flatten-wrap ;todo: collect 1st branches and apply then
+  (partial init ;todo: clean this
+    (fn continue [i & [acc]]
+      (let [[h & t] (flatten i) acc (or acc identity)]
+        (if (branch? h)
+          (concat (continue (h) (comp h acc)) (c/map wrap t))
+          (cons (acc h) (c/map wrap t)))))))
 
 (defn unwrap "lazy-seq of branches interleaved with their init"
   [root]
@@ -287,12 +303,12 @@
   renderer
   (tree-seq
     (comp
-      flatten-wrap
       (children false)
       (set-active true)
       fresh
       initialize-state
       with-state
+      flatten-wrap ;buggy: later make it simpler
       (replace fab)
       tagged)))
 
@@ -390,9 +406,15 @@
        (reduce +)
        (inc)))
 
-(defn pool [size f]
-  (->> (cons nil (repeat size f))
-       (lazy-render)
-       (drop 1)
-       (partition (initial-count f))
-       (c/map first)))
+(defn pool ;todo: maybe use initial-count and reconstruct groups?
+  ([f] (pool nil f))
+  ([size f]
+   (->> (repeat size f)
+        (if (nil? size) (repeat f))
+        (cons nil)
+        (lazy-render)
+        (drop 1)
+        (filter
+          #(if-cmpt % [tr Transform]
+             (= tr (.root tr)))))))
+          

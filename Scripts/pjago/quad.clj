@@ -1,6 +1,6 @@
 (ns pjago.quad
   (:use arcadia.core arcadia.linear pjago.hooks)
-  (:import [UnityEngine Application GameObject Transform Vector3 Matrix4x4 Quaternion Space ForceMode Time Rigidbody JointMotor Joint HingeJoint FixedJoint Material MeshRenderer Camera BoxCollider SphereCollider RigidbodyConstraints Component]
+  (:import [UnityEngine Application GameObject Transform Vector3 Matrix4x4 Quaternion Space ForceMode Time Rigidbody JointMotor Joint HingeJoint FixedJoint Material MeshRenderer Camera BoxCollider SphereCollider RigidbodyConstraints Component Rect GUI]
            ArcadiaState ArcadiaBehaviour)
            ; [amalloy.ring_buffer RingBuffer])
   (:require [common.math :as m]
@@ -83,6 +83,7 @@
 ;angular momentum. this fn adds that missing change
 
 ;Euler rotation equation : Iw' + w x (Iw) = Torque
+;not an easy EDO. that's why unity ignores the second term
 
 ;needs to simulate entire physics here
 ;https://physics.stackexchange.com/questions/128471/how-to-simulate-rotational-instability
@@ -578,9 +579,5 @@
 
 ;; DEV
 
-(do
-  ; (load "quad/test")
-  (load "quad/editor")
-  (load "quad/scene")
-  ; (load "quad/spec"))
-  nil)
+(load "quad/editor")
+(load "quad/scene")

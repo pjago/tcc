@@ -21,7 +21,7 @@
  ;; when not declared every user clj file in Assets will be compiled
  ;; :build-namespaces [foo.core]
  ; :dependencies [[nasser/magic "0.0.1-SNAPSHOT"]]
- :build-namespaces [pjago.quad]
+ :build-namespaces [pjago.quad] ;[pjago.test]
 
  ;; set to true in user configuration.edn to enable automatic code
  ;; reloading when a clojure file is saved
