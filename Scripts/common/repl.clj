@@ -10,6 +10,8 @@
             [arcadia.sugar :as as]
             [clojure.string :as str]))
 
+;; TODO: some sugar for layers
+
 ;; UTIL
 
 (defn resolve-but-dont-break-please [sym]
@@ -65,6 +67,9 @@
 (def ^{:doc "memoized path inside Assets/Resources, for an id"}
   path (memoize -path))
 
+(defn restore-path []
+  (alter-var-root #'path (constantly (memoize -path))))
+
 (defn aka "short path of id" [id]
   (let [p (path id)]
     (if-let [jao (and (string? p) (peek (str/split p #"/")))]
@@ -95,19 +100,16 @@
 (declare resource resources)
 
 (defn o= "true only if x and y share some resources"
+  ;should handle nil in a special manner!
   [x y]
   (cond
-    (coll? (path x))
-    (contains? (set (resources x)) (resource y))
-    (coll? (path y))
-    (contains? (set (resources y)) (resource x))
     (instance? clojure.lang.Namespace x)
     (str/starts-with? (str (where y)) (str x))
     (instance? clojure.lang.Namespace y)
     (str/starts-with? (str (where x)) (str y))
     :else
-    (= (or (seq (resources x)) x) 
-       (or (seq (resources y)) y))))
+    (or (contains? (set (resources x)) (resource y))
+        (contains? (set (resources y)) (resource x)))))
 
 ;; SOURCE
 
@@ -159,9 +161,9 @@
      (satisfies? ISceneGraph -utype)
      (distinct (sequence (comp (map #(resource % GameObject)) (filter #(o= id %))) (gobj-seq -utype)))
      (instance? UnityEngine.Object -utype)
-     (list (resource -utype (type -utype)))
+     (if-let [one (resource -utype (type -utype))] (list one))
      (and (satisfies? ISceneGraph id) (not (prefab? id)))
-     (list (resource id -utype))
+     (if-let [one (resource id -utype)] (list one))
      (or (isa? -utype UnityEngine.Object) (nil? -utype))
      (let [utype (ensure-type -utype)]
        (if-not (coll? (path id))
@@ -169,7 +171,7 @@
            (isa? utype UnityEngine.Component)
            (mapcat #(cmpts % utype) (resources id GameObject))
            (and (instance? GameObject id) (not= id (PrefabUtility/FindPrefabRoot id)))
-           (list (resource id utype))
+           (if-let [one (resource id utype)] (list one))
            (instance? clojure.lang.Namespace id)
            (filter #(o= id %) (resources "" utype))
            :else
@@ -220,6 +222,8 @@
        (filter pred (gobj-seq utype))
        (nil? utype)
        (objects-search id GameObject)
+       (instance? GameObject id) ;hmmm..
+       [(state id utype)]
        :else
        (sequence (comp (filter pred) (keep #(state (gobj %) utype)))
                  (objects-typed ArcadiaState))))))
@@ -346,9 +350,14 @@
 
 (require '[common.processing :as x])
 
+(defn clean-renderer []
+  (x/restore-renderer)
+  (alter-var-root #'x/*renderer* comp
+    #(x/doto % clc (fn [] (clear! *ns*)))))
+
 (alter-var-root #'x/keypath (constantly keypath))
 (alter-var-root #'x/resource (constantly resource))
-(alter-var-root #'x/clone! (constantly clone!))
+; (alter-var-root #'x/clone! (constantly clone!)) ;bug: undo
 
 (defn tag-all! "creates tags for every GameObject resource found with id.\n  You can pass an empty string to really tag all."
   [id]
@@ -361,6 +370,10 @@
 ;; REPL UX possibly todo: move to separate file, same ns
 
 (import '[UnityEditor EditorApplication EditorGUIUtility Selection SceneView GameView])
+
+(defn scene-view []
+  (or SceneView/lastActiveSceneView 
+      (EditorWindow/GetWindow SceneView)))
 
 (defn clc "clears log" []
   (-> (Type/GetType "UnityEditor.LogEntries, UnityEditor.dll")
@@ -380,16 +393,17 @@
    (pause (not EditorApplication/isPaused)))
   ([toggle] 
    (do (set! EditorApplication/isPaused toggle)
-       (.Focus SceneView/lastActiveSceneView)
+       (.Focus (scene-view))
        nil)))
 
 (defn select "selects gobj in the hierarchy" [id]
   (->> (object-search id GameObject)
+       (if (instance? GameObject id) id)
        (set! Selection/activeGameObject)))
 
 (defn zoom "scene view zoom" [id] ;todo: zoom distance
-  (if-let [sv SceneView/lastActiveSceneView] 
-    (if-let [gob (object-search id GameObject)]
+  (if-let [sv (scene-view)]
+    (if-let [gob (if (instance? GameObject id) id (object-search id GameObject))]
       (let [rot (.-rotation sv)]
         (.AlignViewToObject sv (.-transform gob))
         (set! (.-rotation sv) rot)
@@ -401,18 +415,19 @@
    (if (instance? UnityEditor.EditorWindow id)
      (.Focus id)
      (do (select id)
-         (.Focus SceneView/lastActiveSceneView)
+         (.Focus (scene-view))
          (EditorApplication/ExecuteMenuItem "Edit/Frame Selected")
          (EditorApplication/ExecuteMenuItem "Edit/Lock View to Selected")
          nil))))
 
 (defn ping "pings in the hierarchy" [id]
   (->> (object-search id GameObject)
+       (if (instance? GameObject id) id)
        (EditorGUIUtility/PingObject)))
 
 (defn toggle "toggles gobj or cmpt tree view"
   [id bool] ;bug: steals focus the first time
-  (if-let [obj (object-search id GameObject)]
+  (if-let [obj (if (instance? GameObject id) id (object-search id GameObject))]
     (if (instance? UnityEngine.Component id)
       (do (select obj) ;bug: needs to wait one frame
           (let [tracker UnityEditor.ActiveEditorTracker/sharedTracker

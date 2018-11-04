@@ -78,15 +78,6 @@
       useGravity false
       angularDrag 0.0))
 
-(comment [_ (re/clear! :T)]
-         T (doto (re/clone! :T) (.SetActive true)) 
-         (as/with-cmpt rb Rigidbody) T
-  ; (hook+ T :fixed-update :unstable-rotation #'missing-physx)
-  (hook+ T :fixed-update :unstable-rotation #'missing-physx-udemy)
-  (as/sets! rb
-    angularVelocity (v3 10 0 0))
-  (.AddTorque rb (v3 0 0 10)))
-
 (comment [b (GameObject. "my-balls")]
          b0 (create-primitive :sphere)
          b1 (create-primitive :sphere)

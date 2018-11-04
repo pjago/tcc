@@ -1,9 +1,9 @@
 (ns common.processing
   (:use [arcadia.core :exclude [if-cmpt log children]] arcadia.linear)
-  (:import [UnityEngine Application Transform GameObject MeshRenderer Rigidbody RigidbodyConstraints]
+  (:import [UnityEngine Application Space Rigidbody Quaternion Transform GameObject MeshRenderer Rigidbody RigidbodyConstraints]
            [clojure.lang IMeta IDeref]
            ArcadiaState ArcadiaBehaviour |ArcadiaBehaviour+IFnInfo[]|)
-  (:refer-clojure :exclude [map replace tree-seq doto memoize])
+  (:refer-clojure :exclude [trampoline map replace tree-seq doto memoize])
   (:require [clojure.core :as c]
             [arcadia.core :as ac]
             [clojure.walk :as w]))
@@ -52,21 +52,13 @@
 
 ;; COMP
 
+(declare scene)
+
+(defmacro fx [& body]
+  `(fn ~'[& _] (do ~@body)))
+
 (defn branch? [x]
   (or (fn? x) (var? x)))
-
-(defn wrap [x]
-  (if (branch? x) x
-    (let [init (cond
-                 (instance? IDeref x) #(deref x)
-                 (sequential? x) (fn [] x)
-                 :else (fn [] [x]))]
-      (fn
-        ([] (init))
-        ([acc in] acc)
-        ([acc] acc)))))
-
-(def nop (wrap nil))
 
 (defn init [f1 f]
   (fn
@@ -100,62 +92,134 @@
       ([acc in] (doseq [f f2] (f acc in)) acc)
       ([acc] (doseq [f f1] (f acc)) acc))))
 
+;I should move map logic to init, after fab @todo
+;but unlike fab, it has to precede flatten-wrap @bug
+;the goal is to move fresh-state to init
+(defn wrap 
+  ([x] 
+   (wrap x (completing (fn [acc in] acc))))
+  ([x rf]
+   (cond 
+     (branch? x) x
+     (some? x)
+     (let [m (meta x)
+           init (if (map? x) (::init m x) x)
+           rf (fn
+                ([] [init])
+                ([acc in] (rf acc in))
+                ([acc] (rf acc)))]
+       (if (map? x)
+         (as-> (complete #(roles+ % x) rf) rf
+               (if-let [xf (::renderer m)]
+                 ((xf) rf)
+                 rf))
+         rf)))))
+
+;; last changes made it slow. todo: make everything faster
+;; trampoline kind makes it obvious the init arity should have no side-effects @bug?
+(defn trampoline
+  ([x]
+   (as-> (wrap x) x (trampoline (x) x)))
+  ([x rf]
+   (cond
+     (branch? x)
+     (let [root (trampoline (x) x)]
+       (fn
+         ([] (root))
+         ([acc] (root acc) (rf acc))
+         ([acc in] (root acc in) (rf acc in))))
+     (sequential? x)
+     (let [node (first x)
+           root (trampoline node rf)]
+       (fn
+         ([] (concat (root) (rest x)))
+         ([acc] (root acc))
+         ([acc in] (root acc in))))
+     (nil? x)
+     (wrap (scene) rf)
+     :else 
+     (wrap x rf))))
+
 ;; TRAVERSAL
 
-(defn map "maps xf on init" [xf]
+(defn map "maps xf on init" [xf] ;lazy
   (->> #(if (branch? %) (xf %) %)
        (partial c/map)
        (partial init)))
 
-(defn tree-seq "tree-seqs xf on init" [xf]
+(defn tree-seq "tree-seqs xf on init" [xf] ;lazy
   (fn continue [rfn]
     (if-not (branch? rfn) rfn
       (init (partial c/map continue)
             (xf rfn)))))
 
-(defn prewalk "prewalks f on init" [f]
+(defn prewalk "prewalks f on init" [f] ;not lazy
   (fn continue [rfn]
     (if-not (branch? rfn) rfn
       (init (partial w/prewalk (comp continue f))
             rfn))))
 
-(defn postwalk "postwalks f on init" [f]
+(defn postwalk "postwalks f on init" [f] ;not lazy
   (fn continue [rfn]
     (if-not (branch? rfn) rfn
       (init (partial w/postwalk (comp f continue))
             rfn))))
 
+;; PROTOCOLS
+
+(defmutable SceneGraph 
+  [children])
+
+(defprotocol IResourceLocation
+  (-tag ^clojure.lang.Keyword [this]))
+
+(extend-protocol ISceneGraph
+  SceneGraph
+  (gobj [this] this)
+  (parent [this] this)
+  (children [this]
+    (vec (.-children this)))
+  (child+
+    ([this child transform-to]
+     (child+ this child))
+    ([this child]
+     (set! (.-children this) (conj (.-children this) child))
+     nil))
+  (child-
+    ([this child transform-from]
+     (child- this child))
+    ([this child]
+     (set! (.-children this) (disj (.-children this) child))
+     nil)))
+
+(extend-protocol IResourceLocation
+  SceneGraph
+  (-tag [scene] ::scene)
+  GameObject
+  (-tag [gob]
+    (let [t (.tag gob)]
+      (if (= (nth t 0) \:)
+        (keyword (subs t 1))
+        (keyword "unity" t)))))
+
+(def tag 
+  (c/memoize -tag))
+
+(defn by-tag 
+  ([coll] (group-by tag coll))
+  ([coll fun]
+   (reduce-kv #(assoc %1 %2 (fun %3)) {} (group-by tag coll))))
+
+(def s> 
+  #(object-tagged (str %)))
+
+(def ss>
+  #(objects-tagged (str %)))
+
+(defn scene [] 
+  (->SceneGraph #{}))
+
 ;; UTIL
-
-(defn tag [^GameObject gob]
-  (let [t (.tag gob)]
-    (if (= (nth t 0) \:)
-      (keyword (subs t 1))
-      (keyword "unity" t))))
-
-;tagged assimilates objects-tagged to objects-search
-;it also facilitates the usage of isa? with tags
-;bug: this is in a weird position, because it has to do it before step
-;so it needs at init see both the tag and the object, but should'nt fab here
-(defn tagged "if the tag doesn't yet exists, you can run common.repl/tag-all! to create"
-  [rf]
-  (let [t (volatile! "Untagged")]
-    (fn
-      ([gob] (rf gob))
-      ([gob child] (rf gob child))
-      ([]
-       (let [[h & tail] (rf)]
-         (vreset! t (str (keypath h)))
-         (cons
-           (fn 
-             ([] [h])
-             ([gob]
-              (try
-                (if (instance? GameObject gob)
-                  (set! (.tag gob) @t))
-                (catch Exception _))
-              gob))
-           tail))))))
 
 (defn freeze [pos & [rot]]
   (letfn [(fpos [x]
@@ -175,13 +239,42 @@
                 rot)]
       (partial complete
         #(with-cmpt % [rb Rigidbody]
-           (set! (.constraints rb) c))))))
+           (set! (.constraints rb) 
+                 (enum-or (.constraints rb) c)))))))
 
-(defn paint [material]
-  (partial complete
-    (fn [gob]
-      (if-cmpt gob [mr MeshRenderer]
-        (set! (.-sharedMaterial mr) material)))))
+(defn unfreeze [pos & [rot]]
+  (letfn [(fpos [x]
+            (case x
+              :x RigidbodyConstraints/FreezePositionX
+              :y RigidbodyConstraints/FreezePositionY
+              :z RigidbodyConstraints/FreezePositionZ))
+          (frot [x]
+            (case x
+              :x RigidbodyConstraints/FreezeRotationX
+              :y RigidbodyConstraints/FreezeRotationY
+              :z RigidbodyConstraints/FreezeRotationZ))]
+    (let [c (transduce (c/map frot) enum-or
+                (transduce (c/map fpos) enum-or 
+                  RigidbodyConstraints/None
+                  pos)
+                rot)
+          c (bit-and (int RigidbodyConstraints/FreezeAll)
+                     (bit-not (int c)))]
+      (partial complete
+        #(with-cmpt % [rb Rigidbody]
+           (set! (.constraints rb) 
+                 (enum-and (.constraints rb) c)))))))
+
+(defn paint 
+  ([material] (paint material false))
+  ([material gob-seq?]
+   (partial complete
+     (as-> #(if-cmpt % [mr MeshRenderer]
+              (set! (.-sharedMaterial mr) material)) p
+           #(if (satisfies? IEntityComponent %) (p %))
+           (if gob-seq?
+             #(doseq [g (gobj-seq %)] (p g))
+             p)))))
 
 (defn memoize [rf]
   (let [done (volatile! nil)]
@@ -191,16 +284,28 @@
       ([gob] (rf gob)))))
 
 (defn log [f]
-  #(let [% (memoize %)]
-     (doto %
-       (fn
-         ([] (ac/log "init" (f (first (%)))))
-         ([gob child] (ac/log "step" (f gob)))
-         ([gob] (ac/log "complete" (f gob)))))))
+  #(fn 
+     ([]
+      (ac/log "pre\tinit\t\t" %)
+      (let [x (%)] 
+        (ac/log "post\tinit\t\t" (f (first x)))
+        x))
+     ([gob]
+      (ac/log "pre\tcomplete\t" (f gob))
+      (let [x (% gob)]
+        (ac/log "post\tcomplete\t" (f x))
+        x))
+     ([gob child]
+      (ac/log "pre\tstep\t\t" (f gob))
+      (let [x (% gob child)]
+        (ac/log "post\tstep\t\t" (f x))
+        x))))
 
 ;fresh addresses the same problem as defmutable-once,
 ;but through walking a roundtrip of snapshot and mutable
-(defn fresh [rf]
+;maybe this should after the db init?? @potential bug?
+;and then wrap for maps would have add roles before that (at fab)
+(defn fresh-state [rf]
   (let [mm @#'ac/maybe-mutable
         ms @#'ac/maybe-snapshot
         m (c/memoize #(w/walk (comp (partial %1 %1) ms) mm %2))]
@@ -208,12 +313,19 @@
       #(if-cmpt % [as ArcadiaState]
          (reduce-kv state+ %
            (m m (state %)))))))
+    ; (doto rf ;complete ;init
+    ;   (fn [h] ;[h :as b]]
+    ;     (if-cmpt h [as ArcadiaState]
+    ;       (reduce-kv state+ h (m m (state h))))))))
+    ;     ;b)
+    ;   ;rf)))
 
+;; todo: option where it mantains the activeSelf of resource
 (defn set-active [self]
-  #(doto %
-     (fn [gob]
-       (if (instance? GameObject gob)
-         (.SetActive gob self)))))
+  (partial complete
+    (fn [gob]
+      (if (instance? GameObject gob)
+        (.SetActive gob self)))))
 
 (defn children [transform-to]
   (partial step
@@ -224,16 +336,19 @@
 (defn replace [lookup]
   (partial init
     #(let [node (first %)]
-       (cons
-         (if (branch? node)
-           ((replace lookup) node)
-           (lookup node))
-         (rest %)))))
+       (cons (lookup node) (rest %)))))
 
 (defn with-db [lookup]
   (partial init
     (partial w/postwalk
       #(if (branch? %) % (lookup %)))))
+
+(defn with-xf [renderer-map]
+  (replace
+    (fn [x]
+      (reduce-kv #(if (isa? x %2) (%3 %1) %1)
+                 (wrap x)
+                 renderer-map))))
 
 (def with-state
   (partial init
@@ -269,33 +384,47 @@
            (doseq [f (sort-by k ifns)]
              (.AddFunction h (.fn f) (.key f))))))))
 
+;todo: 1-arity for hierarchy insertion
+(defn transform-to [position rotation]
+  (partial step
+    (fn [gob child]
+      (let [tr (.transform child)]
+        (set! (.. child transform localPosition)
+              (v3+ (.localPosition tr) position))
+        (set! (.. child transform localRotation)
+              (qq* (.localRotation tr) rotation))))))
+
 ;; RENDER
 
 (def ^{:doc "flattens init to be [node & branches]"}
-  flatten-wrap ;todo: collect 1st branches and apply then
-  (partial init ;todo: clean this
-    (fn continue [i & [acc]]
-      (let [[h & t] (flatten i) acc (or acc identity)]
-        (if (branch? h)
-          (concat (continue (h) (comp h acc)) (c/map wrap t))
-          (cons (acc h) (c/map wrap t)))))))
-
+  flatten-wrap
+  (comp
+    (partial init
+      #(let [[h & t] (flatten %)]
+         (cons h (keep wrap t))))
+    trampoline))
+    
 (defn unwrap "lazy-seq of branches interleaved with their init"
   [root]
   (lazy-seq
     (when (branch? root)
-      (let [branch (root)]
+      (let [root (trampoline root)
+            branch (root)]
         (->> (mapcat unwrap branch)
              (cons branch)
              (cons root))))))
 
-(defn fab "clones from id's resource, if found.\n  otherwise returns id"
+(defn fab "clones from id's resource, if found.\n  attempts to tag by id."
   [id]
   (if-let [src (resource id GameObject)]
     (let [old (.activeSelf src)]
       (.SetActive src false)
       (let [gob (clone! src)]
         (.SetActive src old)
+        (try
+          (set! (.tag gob) (str (keypath id)))
+          (catch Exception e
+            (str "Try " (list 'tag-all! id))))
         gob))
     id))
 
@@ -304,13 +433,12 @@
   (tree-seq
     (comp
       (children false)
-      (set-active true)
-      fresh
+      (set-active true) ;maybe I don't need this here?
+      fresh-state
       initialize-state
       with-state
-      flatten-wrap ;buggy: later make it simpler
       (replace fab)
-      tagged)))
+      flatten-wrap)))
 
 (def ^{:dynamic true :doc "xf applied by render.\n  can be restored with (restore-renderer)"}
   *renderer* renderer)
@@ -319,7 +447,7 @@
   (alter-var-root #'*renderer* (fn [_] @#'renderer)))
 
 (defn renders "xf interface of render, useful for mocking an init"
-  ([x node tail] (init (fn [_] (cons node tail)) (wrap x)))
+  ([x node tail] (init (fx (cons node tail)) (wrap x)))
   ([x tail] (init #(concat % tail) (wrap x)))
   ([x] (wrap x)))
 
@@ -327,15 +455,16 @@
   render
   (comp
     (fn [root]
-      (let [v (volatile! []) 
+      (let [v (volatile! [])
             f (*renderer* root)]
-        (letfn [(-render [f [node & tail]]
-                  (vswap! v conj node) ;; init
-                  (doseq [c (c/map #(-render % (%)) tail)]
-                    (f node c)) ;; step
-                  (f node) ;;complete
-                  node)]
-          (-render f (f))
+        (letfn [(-render [f]
+                  (let [[node & tail] (f)] ;;init
+                    (vswap! v conj node)
+                    (doseq [c (c/map -render tail)]
+                      (f node c)) ;; step
+                    (f node) ;;complete
+                    node))]
+          (-render f)
           @v)))
     renders))
 
@@ -388,33 +517,46 @@
 
 ;; DEBUG
 
-(defn unwrap-all "like unwrap, but eagerly applies f to all branches"
-  [f root]
-  (->> ((tree-seq memoize) root)
-       (unwrap)
-       (w/postwalk #(if (branch? %) (f %) %))))
+; (defn unwrap-all "like unwrap, but eagerly applies f to all branches"
+;   [f root]
+;   (w/postwalk #(if (branch? %) (f %) %)
+;               (unwrap root)))
 
 ;; NEW
 
-(defmacro fx [& body]
-  `(fn ~'[& _] (do ~@body)))
+; (defn initial-count [f]
+;   (->> ((tree-seq flatten-wrap) (wrap f))
+;        (unwrap-all #(dec (count (%))))
+;        (take-nth 2)
+;        (reduce +)
+;        (inc)))
 
-(defn initial-count [f]
-  (->> ((tree-seq flatten-wrap) (wrap f))
-       (unwrap-all #(dec (count (%))))
-       (take-nth 2)
-       (reduce +)
-       (inc)))
+; (defn scene-count [f]
+;   (->> ((tree-seq flatten-wrap) (wrap f))
+;        (unwrap-all #(instance? SceneGraph (first (%))))
+;        (partition 2)
+;        (filter first)
+;        (mapcat second)
+;        (filter false?)
+;        count))
 
-(defn pool ;todo: maybe use initial-count and reconstruct groups?
-  ([f] (pool nil f))
-  ([size f]
-   (->> (repeat size f)
-        (if (nil? size) (repeat f))
-        (cons nil)
-        (lazy-render)
-        (drop 1)
-        (filter
-          #(if-cmpt % [tr Transform]
-             (= tr (.root tr)))))))
-          
+;; broken?
+; (defn pool "unwraps all f, lazy rendering the result, partioning if scene.\n  repeats n times."
+;   ([f] (pool nil f)) ;todo: rewrite so that passing nil is not ok
+;   ([n f]
+;    (let [f ((tree-seq memoize) (wrap f))
+;          s (scene-count f)
+;          p (->> (repeat n f)
+;                 (if (nil? n) (repeat f))
+;                 (cons nil)
+;                 (lazy-render)
+;                 (drop 1)
+;                 (filter ;todo: maybe dont use transform root
+;                   #(if (instance? GameObject %)
+;                      (with-cmpt % [tr Transform]
+;                        (= tr (.root tr))))))]
+;      (if-not (zero? s)
+;        (partition s p)
+;        p))))
+
+(do 1)

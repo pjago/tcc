@@ -17,7 +17,13 @@
 
 ;; RING BUFFER due to a bug with metadata not found
 
-; (set! *unchecked-math* true)
+(set! *unchecked-math* true)
+
+;challenge here: maybe don't create a new RingBuffer.
+;question: will everything break?
+;naah. let's just declare the constructor
+
+(declare ->RingBuffer)
 
 (defmutable RingBuffer [^long start ^long len buf meta]
   Counted
@@ -88,7 +94,7 @@
                                 (list '. gobj)))])
             keys)))))
 
-(def watch-root (str "../../TCC/data/" (.ToUnixTimeSeconds System.DateTimeOffset/UtcNow)))
+(def watch-root (str "./data/" (.ToUnixTimeSeconds System.DateTimeOffset/UtcNow)))
 
 (def ^{:private true} watch-db (atom {}))
   
@@ -99,22 +105,33 @@
 (extend-protocol IWatch
   nil
   (check [_] nil)
-  (watch [_] nil))
+  (watch [_] nil)
+  clojure.lang.APersistentVector
+  (check [obj]
+    {:vals (mapv (fn [o] (merge (check o) {:type (str (type o)) :hash (hash o)})) 
+                 obj)})
+  (watch [obj]
+    (if-let [w (seq (keep watch obj))]
+      {:vals (vec w)})))
 
 ;todo: check-js and watch-csv fns, that call watch and check
 ;check-js should return a string or a map 'almost' js
 (defn check-js [obj]
   (into {}
-    (map (fn [[k v]] [k (if (instance? arcadia.core.IMutable v)
+    (map (fn [[k v]] [k (cond 
+                          (instance? arcadia.core.IMutable v)
                           [(str (type v)) (hash v)] 
-                          v)]))
+                          (nil? v) 'null
+                          :else v)]))
     (check obj)))
 
+;serialize here to reduce performance hit on spit-watch @todo
 (defn watch-state [^UnityEngine.GameObject gob k]
-  (swap! watch-db update gob (partial merge-with conj)
-    (into {}
-      (map (fn [v] [v (watch (state gob v))]))
-      (state gob k))))
+  (let [watch-map (into {}
+                    (keep #(if-let [w (watch (state gob %))] [% w]))
+                    (state gob k))]
+    (if-not (empty? watch-map)
+      (swap! watch-db update gob (partial merge-with conj) watch-map))))
 
 (defn watch+
   ([^GameObject gob k] (watch+ gob k 1001))
@@ -122,8 +139,10 @@
    (if-let [obj (state gob k)]
      (let [buf (with-meta (ring-buffer size) (check-js obj))]
        (swap! watch-db assoc-in [gob k] buf)
-       (hook+ gob :fixed-update ::watch #'watch-state)
-       (update-state gob ::watch (fnil conj #{}) k)))
+       (if (pos? size)
+         (hook+ gob :fixed-update ::watch #'watch-state))
+       (update-state gob ::watch (fnil conj #{}) k))
+     (log (str "Failed to add watch on " (.tag gob) " " k)))
    gob))
 
 (defn watch- [^GameObject gob k]
@@ -132,7 +151,8 @@
   gob)
 
 (defn clear-watch 
-  ([] (run! clear-watch (keys @watch-db)))
+  ([] 
+   (run! clear-watch (keep obj-nil (keys @watch-db))))
   ([^GameObject gob]
    (hook- gob :fixed-update ::watch)
    (state- gob ::watch)
@@ -153,13 +173,16 @@
                      file (str folder "/" (watch-path k) "/" wuid)
                      buf (get gob-db k)
                      chk (meta buf)
-                     wch (nth buf -1)
                      vf (fn [x] (str/join "," (map (comp #(or (re-find #"(?<= ).*" %) %) print-str) (vals x))))
                      kf (fn [x] (str/join "," (map #(str/replace (name %) "-" "_") (keys x))))
-                     cf (fn [[k v]] [k (cond (enum? v) (int v) (instance? Type v) (str v) :else v)])
-                     js (merge chk {:type (type obj) :hash (hash obj)} info)]
+                     cf (fn [[k v]] [k (cond (enum? v) (int v) (instance? Type v) (str v) 
+                                             (and (number? v) (or (Double/IsInfinity v) (Double/IsNaN v))) ;haha
+                                             (str v)
+                                             :else v)])
+                     js (merge info chk {:type (type obj) :hash (hash obj)})]
                  (System.IO.Directory/CreateDirectory (re-find #".*(?=/)" file))
-                 (spit (str file ".csv") (str/join "\n" (cons (kf wch) (sequence (map vf) buf))))
+                 (if-not (empty? buf)
+                   (spit (str file ".csv") (str/join "\n" (cons (kf (nth buf -1)) (sequence (map vf) buf)))))
                  (spit (str file ".json") ;todo: use an actual edn to json converter
                        (-> (str (into {} (map cf) js))
                            (str/replace #":([^\s]+) " "\"$1\": ")
@@ -167,4 +190,5 @@
                            (str/replace #"(\[[^\s]*\") " "$1,")
                            (str/replace #"#[^\s]* " "")))
                  file))]
+       (log (str "Saving at: " folder " (" wuid ")"))
        (future (mapv spit-key watch-keys))))))

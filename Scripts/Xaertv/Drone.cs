@@ -11,8 +11,6 @@ namespace XaertV
     const float STEER_FORCE = .05f;
     const float MAX_SPIN = .5f;
     Vector3 frontLeft, frontRight, rearLeft, rearRight;
-    public Camera projectWith;
-    public bool useMouseWheel = false;
 
     Rigidbody body;
     Transform mTransform;
@@ -29,14 +27,10 @@ namespace XaertV
     // Update is called once per frame
     void FixedUpdate ()
     {
-      float forward = Input.GetAxis("Vertical");
-      float right = Input.GetAxis("Horizontal");
-      float up = Input.GetKey("left alt") ? -5.0f : 5.0f * Input.GetAxis("Jump");
-      float spin =
-        useMouseWheel ?
-          5.0f * Input.GetAxis("Mouse ScrollWheel") :
-          (Input.GetMouseButton(0) ?
-            3.5f * TowardsInput(Input.mousePosition) : 0.0f);
+      float forward = Input.GetAxis("Forward");
+      float right = Input.GetAxis("Right");
+      float spin = 5.0f * Input.GetAxis("Horizontal");
+      float up = 5.0f * Input.GetAxis("Vertical");
 
       Vector3 orientation = mTransform.localRotation.eulerAngles;
       orientation.y = 0;
@@ -51,16 +45,6 @@ namespace XaertV
       float desiredSpin = spin - localangularvelocity.y;
 
       ApplyForces( desiredForward / MAX_TILT, desiredRight / MAX_TILT, up - velY, desiredSpin );
-    }
-
-    float TowardsInput(Vector3 onScreen) // ONLY WORKS WITH TOP VIEW
-    {
-      float height = projectWith.gameObject.transform.position.y - mTransform.position.y;
-      Quaternion heading = mTransform.rotation;
-      Vector3 from = heading * Vector3.right;
-      Vector3 to = projectWith.ScreenToWorldPoint(new Vector3(onScreen.x, onScreen.y, height)) - mTransform.position;
-      float angle = Vector3.AngleBetween(from, to);
-      return 2.0f*angle/Mathf.PI - 1.0f;
     }
 
     void ApplyForces( float forward, float right, float up, float spin )
