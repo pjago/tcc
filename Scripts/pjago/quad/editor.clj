@@ -221,7 +221,8 @@
        (let [{:ctrl/keys [height yaw pitch roll euler]} (state q)
              fx (cmpt q (:fixed-update hook-types))
              rb (cmpt q Rigidbody)
-             tr (objects-tagged (str ::trail))]
+             tr (objects-tagged (str ::trail))
+             sck (state gob :scrollbar/key)]
          (when height (reset height))
          (when yaw (reset yaw))
          (when roll (reset roll))
@@ -248,6 +249,13 @@
          (state+ gob :player/pitch 0.5)
          (state+ gob :player/roll 0.5)
          (state+ gob :player/yaw 0.5)
+         ;react vibes
+         (if (= (namespace sck) "player")
+           (let [scv (state gob :scrollbar/value-txt)
+                 scb (state gob :scrollbar)]
+             (set! (.text scv) (format "%.4f" 0.5))
+             (state+ gob :scrollbar/skip true)
+             (set! (.value scb) (float 0.5))))
          (run! #(.Clear (cmpt % TrailRenderer)) tr)
          (canvas-toggle gob ::constraint)))
      (doseq [cam (state gob :camera)]
@@ -280,11 +288,12 @@
       (set! (.orthographicSize cam) 
             (m/lmap (* value value) 0.0 1.0 0.3 2.1)))))
 
-;basically this should remove some hooks, enable others
+;I should account for the constraints here
 (defmethod canvas-toggle :pid [gob k]
   (if (state gob k)
     (switch-ctrl {:roll i-pd :pitch i-pd :yaw i-pdy :height i-pdh})
-    (switch-ctrl {:roll lead-d :pitch lead-d :yaw lead-dy :height lead-dh})))
+    (switch-ctrl {:roll lead-d :pitch lead-d :yaw lead-dy :height lead-dh}))
+  (canvas-toggle gob ::constraint))
 
 ; it is better to have step, relay, wind as buttons, and add the home button
 (defmethod canvas-toggle :step [gob k]
