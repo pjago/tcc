@@ -1,0 +1,26 @@
+relay 0.1 x
+from /data/1538335302/pjago/quad/quad/ctrl/pitch/20665 to 20668
+the inertiaTensor is ok, angular draft is from acquired system
+G1 has a fractional delay from 0 to 1, so the pole is beetween 2.2 and 3.3 (2.5)
+G2 is really well matched but only through cheating (multiplying the mass by 12)
+Overall, good approximation but with something weird on mass trick.
+TODO: find explanation for mass trick, maybe is due to error on the inertiaTensor
+TODO: see what can be done to correct gain error
+UPDATE: found explanation, scaling the center of mass by 12 solves the problem.
+TODO: maybe the quad scaling is multiply by its center of mass, so in reality
+its position at my reference frame is at (0, -0.008, 0)*12*0.075
+
+Gsim =                       ;sem atraso no atuador (1° lpf 2.501)
+               150.55
+  --------------------------------
+  (s+3.158) (s^2 + 2.037s + 23.22)
+
+Gsim =                       ;com um de atraso no atuador (1° lpf 2.501)
+               108.76
+  --------------------------------
+  (s+2.272) (s^2 + 1.559s + 23.93)
+
+Gs = 
+                96.99
+  --------------------------------
+  (s+2.501) (s^2 + 1.714s + 21.05)

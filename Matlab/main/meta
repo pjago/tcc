@@ -1,0 +1,24 @@
+pitch/relay 1 0/1.mat
+pitch/relay 5 10/1.mat
+pitch/pertubação/1.mat
+pitch/0.045005150518769, 0.402041913315640, 2.562290989946025/
+pitch_sim/
+off/
+
+batt 0.138g: unstable
+(it) [0.02377 0.04702 0.02371]
+(cm) [0.0 -0.0054 0.0]
+
+batt 0.184g: 0.0745 Hz (0.47 rad/s)
+(it) [0.02385 0.04704 0.02377]
+(cm) [0.0 -0.0068 0.0]
+
+batt 0.230g: 0.1114 Hz (0.7 rad/s)
+(it) [0.02392 0.04706 0.02382]
+(cm) [0.0 -0.008 0.0]
+
+height relay 1:
+Gjw = -19.0352; w = 1.4215; astron(Gjw, 1*exp(-1j*150*pi/180), w, 1/8);
+
+Estimated Gs (relay curve fit):
+a = 0.0112; b = 0.0026; c = 0.0359;

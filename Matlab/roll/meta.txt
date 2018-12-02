@@ -1,0 +1,137 @@
+relay 1 0 foi utilizado para identificar ruídos 
+(8 Hz não é múltiplo ímpar da frequência crítica 0.78, e tem um ganho razoável)
+(dessa forma, um derivador da saída é mais eficaz ao se adicionar um low pass em 8 Hz)
+
+OBS
+  os relés foram realizados antes da correção do ganho do modo de vôo +
+  portanto, existiu um ganho de 4x o valor esperado da variável de controle
+  ou seja, planejou-se um D de 0.5 %, mas na realidade o D foi de 2 %.
+  apesar de ser numerado como 1 %, quando se imaginou 100 % como 2 full on.
+  na versão final, considera-se 100 % apenas um atuador no seu máximo.
+
+DEF
+  TIMER dt - T
+  ESC 1000-2000
+  BLDC MX2212 920 kv
+  fu = @(u) (25.292*u.^0.5 + 6.331).^2 + 1000
+
+10.32 V
+  relay+deadbatt
+
+11.78 V
+  degrau_impulso+ (1(20)% 25�)
+  degrau_impulso- (-1(20)% 10�) (E3 > E1)
+
+11.65 V
+  relay 5 0 (no filter)
+  relay 5 0 Q2
+  relay 1 0 Q2 (r�pido e robusto)
+
+11.38 V
+  relay 1 0 Q2 BZN/1 (dobro de ganho)
+  relay 1 0 Q2 BZN/2 (filtro 0.2 + 0.8)
+    H1: falhou devido a presen�a de harm�nicos no sinal PI
+    H2: falhou devido ao deslocamento de fase devido a malha PI
+  relay 1 0 Q2 BZN/3 (filtro 0.5 + 0.5)
+    H1: falhou porque parametriza apenas a partida do rel�
+    H2: a propor��o do semiciclo anterior realimenta o rel�    
+  relay 1 0 Q2 OFF/1 (-0.027616)
+    H1: � a solu��o mais simples, e mais fiel ao rel� ideal
+
+11.30 V
+  relay 1 0 Q2 OFF/2 (-0.027616)
+  relay 1 0 Q3 OFF (-0.027616) (~Ts) (falha: cycle)
+  relay 1 0 Q2.5 OFF (-0.027616) (Ts) (falha: cycle)
+  relay 1 0 Q2.25 OFF !TIMER (-0.027616) (falha: cycle)
+END
+
+DEF
+  TIMER dt - T + dts - Ts
+  RELAY 1 (20) (-2.7616) %
+  ESC 1000-2000
+  BLDC MX2212 920 kv
+  FILTER 2.0 (0.2 + 0.8)
+  fu = @(u) (25.292*u.^0.5 + 6.331).^2 + 1000
+
+11.66 V
+  relay 1 0/1
+  relay 1 1/1
+  relay 1 2/1
+  relay 1 4/1 (falha: cycle)
+    H1: Quanto maior a histerese, menor deve ser a qualidade do filtro
+    H2: Quanto maior a histerese, maior deve ser a propor��o for�ada
+
+11.40 V
+  pid astron/1 //astron(Gjw, 2*exp(-j*pi/2), w, 0.25); % relay 1 2
+  pid astron/2 //astron(Gjw, abs(Gjw)*exp(-j*pi/2), w, 0.25); % relay 1 2
+  pid astron/3 //astron(Gjw, abs(Gjw)*exp(-j*pi/2), w, 0.5) % relay 1 2
+  pid astron/4 //astron(Gjw, 2*exp(-j*pi/1.5), w, 1) % relay 1 2
+  pid astron/5 //astron(Gjw, 4.244*exp(-j*pi/1.9404), w, 1) % relay 1 2
+  OBS: Explicar bem a necessidade de experimentar ajustes de ganho PID, e o
+quanto isso pode consumir tempo. Analisar a resposta ao degrau do pid 4,
+justificando os ajustes feitos de 1 � 4, e apresentando o 'paradoxo' do I.
+Ilustrar o caminho percorrido pelo ponto identificado na curva de nyquist.
+Chamar aten��o para a limita��o de que td < ti, por esse m�todo.
+
+11.76 V (OFF 1.8412 %) (COMP FILTER)
+  relay 1 0/2
+  relay 1 1/2
+  relay 1 2/2
+  relay 1 3/1
+  relay 1 3/2
+
+11.1 V (OFF 1.8412 %) (COMP FILTER)
+  relay 1 0/3
+  relay 1 1/3
+  relay 1 2/3
+  relay 1 3/3
+
+11.54 V
+  pid shape/1 // lshape(Gs, 3.4) %damping: 0.7 kp 0.00014012596198007 ti 0.081434457024230 td 0.583359199932275
+A1: A resposta em regime oscila pr�ximo � frequ�ncia cr�tica, mesmo quando o controle � amortecido.
+H1: Os atuadores oscilam similar � um rel�, apesar de receberem um valor de entrada constante.
+H2: A biblioteca Servo do Ardu�no n�o tem precis�o suficiente.
+  pid shape/2 // lshape(Gs, 3.55) %damping: 0.8 kp 0.00010602393982948 ti 0.081434457024230 td 0.583359199932275
+  pid shape/3 // lshape(Gs, 3.8) %damping: 0.9 kp 0.00008491879449271 ti 0.081434457024230 td 0.583359199932275
+  pid shape/4 // lshape(Gs) %damping: 1.0 kp 0.00006908770109760 ti 0.081434457024230 td 0.583359199932275
+  pid shape/5 // lshape(Gs, 6.1) %damping: 1.1 kp 0.00005701826543864 ti 0.081434457024230 td 0.583359199932275
+  OBS: chamar aten��o para o fato de que, em geral, as curvas root-locus e 
+nyquist, n�o possuem velocidade constante. investigar mais.
+  TODO: LQR com Kalman Filter, a fun��o custo ser� um mix de robustez, e custo energ�tico,
+ambos relacionados com a tens�o da bateria. Relacionar com o root locus.
+
+END
+
+A0: Ao redor do ponto de opera��o 20%, o ganho da fun��o de ativa��o � ~10.
+Em contraste, no ponto de opera��o 80%, o ganho � ~8.2.
+  H1: a efici�ncia de propuls�o aumenta com o aumento da pot�ncia.
+
+A1: Mesmo com um degrau negativo, a resposta foi positiva.
+  H1: o centro de massa est� mais pr�ximo de E1, resultando em menor torque
+  H2: E1 e E3 n�o s�o equivalentes
+  H3: M1 e M3 n�o s�o equivalentes
+  S1: aumentar a fun��o de ativa��o de E1, em rela��o � E3 (quanto? como?)
+  S2: adicionar um offset na atua��o, o suficiente para balancear (quanto?)
+  S3: fechar a malha com um controlador PI, bem lento. (quanto?)
+    1� aplique um rel� sem o controlador, identifique Ku e Tu
+    2� calcule o controlador PI pelo m�todo de Zigler Nichols frequencial
+      [Gjw, w] = relay_info(Y(2500:end), U(2500:end), T); % relay 1 0 Q2/1
+    3� repita o rel� sem o controlador, agora com o offset suficiente
+      
+A2: Existe uma oscila��o de ganho, mais percept�vel em pequenas oscila��es.
+  H1: o atraso de transporte aumentou o ganho cr�tico
+  H2: a tens�o entregue pelo ESC n�o � constante
+
+A3: Informa��es importantes sobre o firmware n�o s�o dispon�veis (HK).
+  H1: a resolu��o da biblioteca Servo n�o � a mesma do ESC
+  H2: a entrada em pulso � mapeada para tens�o por uma raiz quadrada
+
+A4: O jitter da interrup��o do MPU � decisivo na temporiza��o, o momento
+exato n�o pode ser muito longe da amostragem de controle; o jitter pode 
+atrasar uma interrup��o para a pr�xima amostra, quando 
+acontece muito pr�ximo da amostragem de controle.
+  S1: fixar o delay entre a interrup��o e a amostragem
+
+A5: O d utilizado nos relés foi na verdade 2% e não 1%!
+Isso porque cada motor teve um pico-à-pico de 1%.
+Os testes foram feitos antes da correção de ganho na interface do atuador

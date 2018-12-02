@@ -1,0 +1,9 @@
+{
+  "name": "HC_SR04",
+  "keywords": "hc_sr04, ultrasonic", "repository":
+  {
+ "url": "http://www.instructables.com/id/Non-blocking-Ultrasonic-Sensor-for-Arduino/"
+ },
+  "frameworks": "arduino",
+  "platforms": "atmelavr"
+ }

@@ -1,0 +1,20 @@
+kp, ti, td
+0.004251963251485, 0.729214685673582, 0.182303671418396
+tensão inicial : 11.18 V
+tensão final: 9.87 V...
+
+kp, ti, td
+0.001600474762772, 2.966380993602277, 0.741595248400569
+tensão inicial : 11.65 V
+tensão final: 11.54 V
+3 - steady
+5 - step
+6 - sine
+
+kp, ti, td
+0.002262414881498, 1.91958935921, 0.479897339753721
+tensão inicial: 11.44 V
+7 - step
+8 - sine
+9 - steady
+10 - step
