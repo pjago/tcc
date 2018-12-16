@@ -1,0 +1,1 @@
+{"constraints": 0, "mass": 1.0, "hash": -1418554880, "n": 1, "dt": 0.02, "angular_drag": 1.666584, "type": "UnityEngine.Rigidbody", "canvas_state": {"height": false, "pitch": true, "yaw": false, "roll": false, "pid": true, "step": true, "relay": false}, "center_of_mass": [0.0,0.0,0.0], "wuid": 402, "inertia_tensor": [0.01304823,0.02609646,0.01304823], "drag": 0.4}
