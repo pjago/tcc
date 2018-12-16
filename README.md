@@ -1,4 +1,4 @@
-﻿This project is an integral part of my TCC (undergraduate thesis).
+﻿This project is an integral part of my [TCC](https://github.com/pjago/tcc/tree/text) (undergraduate thesis).
 
 It simulates a real quadrotor drone, with the help of [Unity](https://unity3d.com), [Arcadia](https://github.com/arcadia-unity/Arcadia), and [Clojure](https://clojure.org/).
 
@@ -33,7 +33,7 @@ For REPL, you can use the [Socket](https://github.com/nasser/Socket) plugin in [
 (.. (get-player) transform position) ;=> UnityEngine.Vector3
 (.. (get-player) transform rotation) ;=> UnityEngine.Quaternion
 (render player) ;=> renders a new quad with the current settings
-(relay-3) ;=> instantiates the euler-angles feedback relays (TCC WIP)
+(relay-3) ;=> instantiates the euler-angles feedback relays (TCC)
 (clear-all ::quad) ;=> removes all the quads
 ```
 
